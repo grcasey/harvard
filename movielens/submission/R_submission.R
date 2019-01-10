@@ -1,8 +1,13 @@
+# Check if packages should be installed:
+if('caret' %in% rownames(installed.packages()) == FALSE) {install.packages('caret')}
+if('dlyr' %in% rownames(installed.packages()) == FALSE) {install.packages('dplyr')}
+if('tidyverse' %in% rownames(installed.packages()) == FALSE) {install.packages('tidyverse')}
+
+
 # Load libraries:
 library('caret')
-library("dplyr")
+library('dplyr')
 library('tidyverse')
-library('e1071')
 
 # Create edx set, validation set and submission file (as per provided instruction):
 dl <- tempfile()
@@ -49,7 +54,7 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 lambda <- 0.25
 
 # Estimate average raiting:
-mu <- mean(edx$rating):
+mu <- mean(edx$rating)
   
 # Estimate movie effect:
 b_i <- edx %>% 
@@ -83,6 +88,6 @@ colnames(validation)[6] <- "rating"
 
 # Ratings will go into the CSV submission file below:
 write.csv(validation %>% select(userId, movieId, rating),
-          "submission.csv", na = "", row.names=FALSE)
+          "submission2.csv", na = "", row.names=FALSE)
 
 
