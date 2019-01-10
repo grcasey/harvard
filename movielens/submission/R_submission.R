@@ -88,6 +88,6 @@ colnames(validation)[6] <- "rating"
 
 # Ratings will go into the CSV submission file below:
 write.csv(validation %>% select(userId, movieId, rating),
-          "submission2.csv", na = "", row.names=FALSE)
+          "submission.csv", na = "", row.names=FALSE)
 
 
