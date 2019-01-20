@@ -1,0 +1,315 @@
+---
+title: "Report"
+author: "Casey Grasdal"
+date: "1/19/2019"
+output:
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org") 
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org") 
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org") 
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org") 
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(tidyverse)
+df <- read.csv("Computers.csv",sep=',')
+head(df)
+df$X <- NULL
+```
+## 1. Executive summary
+
+For my own project I've decided to work with publicly available dataset available on Kaggle platform - basic computer stats _Computers.csv_, can be downloaded via url https://www.kaggle.com/kingburrito666/basic-computer-data-set (Please, ensure a proper storing of the dataset in the working folder in order to be able to execute the code as its designed).
+
+The dataset comprises a number of numeric and categorical features describing alternative setups for computers and related price tag. I found this data to be interesting for machine learning challenge such as to build a predictive model for price based on computer features.
+
+The data has 6259 observations and 10 different variables: _price_, _speed_, _hd_, _ram_, _screen_, _ads_ and _trend_ are numeric variables, _cd_, _multi_ and _premium_ are categorical variables. The dataset is clean and ready to be utilized for Machine Learning challenge. There was basic preprocessing performed to encode categorical data. The data was divided to train and test dataset.
+
+The modeling stage includes a cross-validation of a number of regression models on Train set: Linear Regression, Support Vector Machine, Generalized Boosted Regression (stochastic gradient boosting) and Random Forest. Although Random Forest demonstrated the longest CPU time performance, it delivers best performing metrics: RMSE and R squared.
+
+I have concluded to proceed with Random Forest. Based on 10-Fold Cross-Validation with tuned hyperparameters on Train set, the best final RF model was chosen. Final model I trained was further used to make price predictions on test set. 
+
+_Please, note that both the R-code and Rmd execution time may take up to approximately 10-15 minutes depending on one's computer processing power._
+
+## 2. Methodology
+
+### 2.1. Data exploration and visualization
+
+The data set was loaded from https://www.kaggle.com/kingburrito666/basic-computer-data-set and saved to the working folder as _Computers.csv_ (289.64 KB). The data was well-suited for machine learning challenge with minimal preprocessing requirements. I needed to remove column _X_ as it's a redundant index column and could not be used as a predictor later at work. 
+
+The data has 2 groups of variables: 
+
+1. _price_, _speed_, _hd_, _ram_, _screen_, _ads_ and _trend_ are numeric features
+2. _cd_, _multi_ and _premium_ are categorical features ('yes' or 'no')
+
+_price_ is dependent variable, while the rest of variables are independent and can be used as predictors for our future model. 
+
+First of all, I have decided to look at kernel density plots for categorical variables. Kernel density plots show price distribution based on categorical variables grouping ('yes' or 'no'). _sm.density.compare_ allows me to superimpose the kernal density plots of price distribution for two different groups of each catergorical variable. Analysis of kernel density plots shows that in case of grouping variable _cd_, the price distribution shifts to the right if computer has a CD ('yes'). This implies that there is a positive correlation between _cd_ and _price_ - straightforward conclusiong from visualization (plots are below).
+
+```{r include=FALSE}
+if(!require(sm)) install.packages("sm", repos = "http://cran.us.r-project.org") 
+library(sm)
+```
+```{r eval=TRUE, echo=FALSE}
+sm.density.compare(df$price, df$cd, xlab="price")
+title(main="Price distribution density by CDs category (yes/no)")
+legend("topright", levels(df$cd), fill=2+(0:nlevels(df$cd)))
+```
+```{r eval=TRUE, echo=FALSE}
+sm.density.compare(df$price, df$multi, xlab="price")
+title(main="Price distribution density by multi category (yes/no)")
+legend("topright", levels(df$multi), fill=2+(0:nlevels(df$multi)))
+```
+```{r eval=TRUE, echo=FALSE}
+sm.density.compare(df$price, df$premium, xlab="price")
+title(main="Price distribution density by premium category (yes/no)")
+legend("topright", levels(df$premium), fill=2+(0:nlevels(df$premium)))
+```
+
+There is a set of numeric features that interesting to get insight into.
+For the next step, I need _corrplot_ and _corrgram_ packages to generate a correlation matrix that shows correlation coefficients between numeric variables. Correlation matrix shows that _price_ is positively correlated with _ram_, _hd_, _screen_ and _speed_ and negatively with _trend_:
+```{r include=FALSE}
+if(!require(corrplot)) install.packages("corrplot", repos = "http://cran.us.r-project.org") 
+if(!require(corrgram)) install.packages("corrgram", repos = "http://cran.us.r-project.org") 
+library(corrplot)
+library(corrgram)
+```
+```{r eval=TRUE, echo=FALSE}
+corrplot(cor(df %>% select_if(is.numeric), method='pearson'),method='square',order="AOE",tl.cex=1)
+```
+
+
+So far, I tried to understand how variables are related to dependent variable _price_ by separating them into 2 groups: numeric and categorical. By appropriating some insights on relations, I've decided to look at more complex visualization, which comprises all variables.
+
+The following picture contains 18 subplots. We can see that this visualization supports insights from previous drawings. For example, almost all numeric variables positively correlated with price except _trend_, and that _cd_ variable is more often takes 'yes' option with increasing _price_ variable. 
+
+Please, note, PDF won't be generated with proper display of 18 subplots thus I strongly recommend to run R-code file to be able to zoom in and inspect the visualization:
+```{r include=FALSE}
+num_column <- c('price', 'speed', 'hd', 'ram', 'screen', 'ads', 'trend')
+cat_column <- c('cd', 'multi', 'premium')
+if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org") 
+library(gridExtra)
+```
+```{r eval=TRUE, echo=FALSE}
+list_plot <- list()
+iter <- 0
+for(feature in cat_column){
+  for(j in 2:length(num_column)){
+    iter <- iter + 1
+    x = num_column[1]
+    y = num_column[j]
+    list_plot[[iter]] <- ggplot(data=df, aes_string(x, y, color = feature)) + 
+       geom_point(size = 1, alpha = .5) + 
+       theme(legend.position = 'top', axis.title = element_text(size=10)) + 
+       scale_color_manual(name = feature, values = c("#FF0000", "#0000FF")) +
+       scale_size_area()
+  }
+}
+do.call(grid.arrange, c(list_plot, ncol = 6))
+```
+
+### 2.2. Data preprocessing.
+
+The dataset doesn't have any missing values. The only preprocessing to perform is to prepare categorical variables for further calculations. One way to take care of categorical variables is to introduce dummy variables. First, I usea _dummy.code()_ from 'psych'-package. But later I've decided to give up on this approach as to avoid loading additional packages to the memory. Instead, to keep it simple by encoding the categorical variables with familiar to us factor()-approach:
+```{r include=FALSE}
+any(is.na(df))
+```
+```{r include=TRUE}
+df$cd = factor(df$cd,
+                 levels = c('yes', 'no'),
+                 labels = c(1, 0))
+
+df$multi = factor(df$multi,
+               levels = c('yes', 'no'),
+               labels = c(1, 0))
+
+df$premium = factor(df$premium,
+               levels = c('yes', 'no'),
+               labels = c(1, 0))
+
+head(df)
+```
+
+
+### 2.3. Modelling
+
+At this stage I had to consider following facts:
+
+* The dependent variable (the one I want to predict) _price_ is continuous, which makes it a regression problem with mix of continuous and categorical predictors (the latter were encoded).
+
+* Cross-validation should be performed to assess well-known algorithms which are well-suited for regression problems and choose one based on time and performance metrics. For regression class of problems the most appropriate metric is Root Mean Squared Error (RMSE). R squared is another statistical measure demonstrating how close data to regression line, ranging from 0 to 1 (0 - 100%), where 1 stands for the best fit and means that the model explains all the variability of the response data around its mean. Time is another factor I want to look at in order to understand how much CPU time is required for one or another model and how critical it can be. 
+
+The data is split to train and test dataset. I also created *test_final* set by excluding a _price_ column to be able to create a full set of predictions after analysis. _test_ set keeps original price values and will be used to compare predictions with original price.
+```{r include=FALSE}
+set.seed(1234)
+test_index <- createDataPartition(y = df$price, times = 1, p = 0.1, list = FALSE)
+train <- df[-test_index, ]
+test <- df[test_index, ]
+test_final <- test[, 2:10] 
+```
+
+The models I consider are Linear Regression (lm), Support Vector Machine (svmLinear), Generalized Boosted Regression (gbm) and Random Forest (rf). I further display box-and-whisker plot for cross-validation results based on RMSE and R squared:
+```{r include=FALSE}
+regressors <- c('lm','svmLinear','gbm','rf')
+time_tracker <- list()
+model <- list()
+iter <- 0
+trControl <- trainControl(method = "cv", number = 10)
+set.seed(7)
+for (regressor in regressors) {
+  iter <- iter + 1
+  start.time <- Sys.time()
+  model[[iter]] <- train(price ~ . , data = train, method = regressor, trControl = trControl, preProcess=c('center', 'scale'))
+  end.time <- Sys.time()
+  # Keep track of time for each regressor:
+  time_tracker <- c(time_tracker, as.numeric(difftime(end.time, start.time, units="sec")))
+}
+names <- c()
+for(i in 1:length(model)){
+  names[i] <- model[[i]]$method
+}
+```
+```{r eval=TRUE, echo=FALSE}
+set.seed(7)
+results <- resamples(list('lm' = model[[1]], 'svmLinear' = model[[2]], 'gbm' = model[[3]], 'rf' = model[[4]]))
+bwplot(results, scales = list(relation = "free")) 
+summary(results)
+```
+
+
+I also visualize model key performing metrics incorporating all 3 key metrics I've described above: time, RMSE and R squared. We can see that Random Forest requires significantly longer time to perform with mean RMSE comparably smaller and mean R squared being proportionally higher. 
+Generalized Boosted Regression also demonstrates good performance, with significantly shorter time, small mean RMSE and high mean R squared. Both models, Generalized Boosted Regression and Random Forest, worth to be considered. 
+```{r include=FALSE}
+if(!require(reshape2)) install.packages("reshape2", repos = "http://cran.us.r-project.org") 
+library(reshape2)
+
+rmse_time <- data.frame('regressor' = names, 
+                        'time' = c(time_tracker[[1]], 
+                                  time_tracker[[2]],
+                                  time_tracker[[3]],
+                                  time_tracker[[4]]), 
+                        'mean_RMSE' = c(mean(results[["values"]][["lm~RMSE"]]),
+                                        mean(results[["values"]][["svmLinear~RMSE"]]),
+                                        mean(results[["values"]][["gbm~RMSE"]]),
+                                        mean(results[["values"]][["rf~RMSE"]])),
+                        'mean_Rsquared' = c(mean(results[["values"]][["lm~Rsquared"]]),
+                                            mean(results[["values"]][["svmLinear~Rsquared"]]),
+                                            mean(results[["values"]][["gbm~Rsquared"]]),
+                                            mean(results[["values"]][["rf~Rsquared"]])) )
+```
+```{r eval=TRUE, echo=TRUE}
+rmse_time
+```
+
+The following plot is the results of cross-validation for our chosen regressors:
+```{r eval=TRUE, echo=FALSE}
+rmse_time <- melt(rmse_time)
+g1 <- ggplot(rmse_time[1:4,], aes(x = regressor, y= value, fill = variable), xlab="xlab") +
+        geom_bar(stat="identity", width=.5, position = "dodge", color='red') +
+        coord_flip() +
+        theme(legend.position="bottom")
+g2 <- ggplot(rmse_time[5:8,], aes(x = regressor, y= value, fill = variable), xlab="xlab") +
+        geom_bar(stat="identity", width=.5, position = "dodge", color='blue') +
+        coord_flip()+
+        theme(legend.position="bottom")
+g3 <- ggplot(rmse_time[9:12,], aes(x = regressor, y= value, fill = variable), xlab="xlab") +
+        geom_bar(stat="identity", width=.5, position = "dodge", color='green') +
+        coord_flip()+
+        theme(legend.position="bottom")
+grid.arrange(g1, g2, g3, nrow = 2)
+```
+
+Because GBM model showed promissing results performing as the second best algorithm for the problem, I have decided to go ahead and try to tune it to see if metrics can improve and exceed those demonstrated by Random Forest. However, time for model tuning went above 23 minutes and I've made a decision not to pursue with this path. The chunk of code for GBM tuning is excluded from my submitted R-code, but I decided to include it into my current report so my peers can take a look in case of interest:
+
+```
+control <- trainControl(method="cv", number=10, repeats=3)
+
+tunegrid <- expand.grid(n.trees = seq(500, 1000, 100),      # step = 100
+                        shrinkage = seq(.1, .5, .1),        # step = 0.1
+                        interaction.depth = seq(1, 9, 1),   # step = 1
+                        n.minobsinnode=seq(1, 5, 1))        # step = 1
+
+gbm_tune<-train(price ~., data = train,
+                method='gbm', tuneGrid = tunegrid, 
+                trControl = control, preProcess=c('center', 'scale'))
+
+print(gbm_tune)
+plot(gbm_tune)
+```
+
+Thus, my choice is a Random Forest model that delivered best performance metrics while CPU execution time was not critical (it took 6 minutes on my machine, I do expect the time should be in the range (5:10) minutes for most of my peer reviewers based on their computational power). 
+
+### 2.4. Random Forest - Final model
+
+To train a Random Forest model I use _train()_ function. By default, the train function without any arguments re-runs the model over 25 bootstrap samples and across 3 options of the tuning parameter. _trainControl_ function allows to specify a number of parameters (including sampling parameters) in my model. There are 2 tuning parameters for RF model, _mtry_ - the number of randomly selected predictors at each cut in the tree and _ntree_ - the number of trees. 
+By running the following code, I obtained the best RF model which minimizes RMSE, and can check its optimal parameters: mtry is equaled to 5, and number of trees is 500.
+
+```{r eval=TRUE, echo=TRUE}
+regressor <- 'rf'
+control <- trainControl(method="cv", number=10)
+set.seed(7)
+rf_model <- train(price ~ . , data = train, method = regressor, trControl = control, preProcess=c('center', 'scale'))
+rf_model 
+```
+```{r eval=TRUE, echo=FALSE}
+plot(rf_model$finalModel)
+```
+
+## 3. Results
+
+I follow with producing predicted values of price for the test set (to be precise, _test_final_ with removed price tags)
+
+```{r eval=TRUE, echo=TRUE}
+rf_results <- predict(rf_model, test_final)
+```
+
+I, then, add predicted values to the dataframe and rearrange columns to its original order following with re-factoring categorical variables to its original format.
+
+```{r include=FALSE}
+test_final <- cbind(test_final, rf_results)
+names(test_final)[10] <- 'price'
+test_final <- test_final[c(10, 1, 2, 3, 4, 5, 6, 7, 8, 9)]
+test_final$cd = factor(test_final$cd,
+                       levels = c(1, 0),
+                       labels = c('yes', 'no'))
+                 
+
+test_final$multi = factor(test_final$multi,
+                       levels = c(1, 0),
+                       labels = c('yes', 'no'))
+
+test_final$premium = factor(test_final$premium,
+                       levels = c(1, 0),
+                       labels = c('yes', 'no'))
+
+head(test_final)
+```
+
+So, at this final stage of my modelling exercise, I obtained 2 test data sets: one with original price tags and another one is with predicted. I am curious to see how well my predictions were made on the test set and if the error is approximately the same as for the train set. And I further see that RMSE on the test set for RF model is quite close to RMSE on the train set (153 vs 157). My model performed on the test set as expected.
+
+```{r eval=TRUE, echo=TRUE}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+set.seed(7)
+rf_rmse <- RMSE(test$price, test_final$price)
+rf_rmse
+```
+
+## 4. Concluding Remarks
+
+For the second project of the Capstone course I've chosen the publicly available dataset from Kaggle platform describing basic computer statistics and related price (access via https://www.kaggle.com/kingburrito666/basic-computer-data-set). It's a well-suited dataset ready to be used for ML challenge, for example, for such supervised problem as predicting the price for subset of computer stat records. It's a regression problem with continuous dependent variable. I utilized cross-validation to identify best performing algorithm among 4 alternatives - Linear Regression, Support Vector Machine, Generalized Boosted Regression and Random Forest, by judging based on set of metrics such as time, RMSE and R squared. By comparing different algorithms, I've chosen Random Forest and used caret package for resampling and tuning in order to obtain best final RF model. I proceeded with predictions made on the test set and compared my results to original price tags. 
+
+The final RF model had performed well demonstrating a minimal RMSE among alternative algorithms (Linear Regression, SVM and GBM), such as 157 on the train set (note, the range of _price_ variable is (949:5399) ). RMSE is one of the most common metrics used to measure accuracy for continuous variables. Moreover, RF showed the best R squared measure (0.92), which tells us about goodness of fit of a regression model. Although RF takes comparatively longer CPU performance time, it's not critical (about 6 minuts on 2.6 GHz Intel Core i5 and 8 Gb RAM).
+
+As a result, I obtained the final dataset with predicted price for each combination of computer stats from the test set. RF model demonstrated a good performance for the assigned regression problem with multiple predictors. 
+
+### 4.1. Possible Future work
+
+As a possible extention to this work the list of alternative algorithms may be extended by including less popular regressors. Alternatively, it is possible to take more time or utilize more powerful machine to run tuning algorithm for Generalized Boosted Regression Model (GBM) in order to understand if GBM may outperform RF. For interested parties, the challenge can be to replicate the code in Python with use of scikit-learn library. 
+
+
+
+
